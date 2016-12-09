@@ -5,13 +5,15 @@
 
 #include <Windows.h>
 
+
 namespace util {
 	/**
 	* Function gets a SID of a group and creates a token with a group entry added in the token
 	* @param sid pointer to sid to be added to the token
-	* @return handle to the token
+	* @param token reference to handle to requested token
+	* @return true if success
 	**/
-	HANDLE name (PSID sid);
+	HAbool name(PSID sid, HANDLE &token)
 }
 
 
