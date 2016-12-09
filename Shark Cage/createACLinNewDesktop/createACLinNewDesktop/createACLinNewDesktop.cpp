@@ -8,9 +8,12 @@
 #include "tchar.h"
 #include "sddl.h"
 
+//TODO: clean this up, naming conventions folks. WHAT THE HECK MEANS dwRes? 
+
+
 int main()
 {
-	DWORD dwRes;
+	DWORD dwRes; 
 	PACL pACL = NULL;
 	PSECURITY_DESCRIPTOR pSD = NULL;
 	//EXPLICIT_ACCESS ea[1];
@@ -60,8 +63,6 @@ int main()
 	ea[0].grfAccessMode = SET_ACCESS;			// what this entity shall do: set rights, remove them, ...
 	ea[0].grfInheritance = NO_INHERITANCE;
 	ea[0].Trustee.TrusteeForm = TRUSTEE_IS_SID;
-	//ea[0].Trustee.TrusteeType = TRUSTEE_IS_USER;
-	//ea[0].Trustee.ptstrName = (LPTSTR)sid_system;
 	ea[0].Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
 	ea[0].Trustee.ptstrName = (LPTSTR)sid_system;
 	// fill EXPLICIT_ACCESS with second ACE for admin group
