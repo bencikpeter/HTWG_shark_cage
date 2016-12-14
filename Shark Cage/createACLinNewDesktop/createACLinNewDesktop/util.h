@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef UNICODE
+#define UNICODE
+#endif 
+
 #ifndef UTILFILE_H
 #define UTILFILE_H
 
@@ -13,7 +17,7 @@ namespace util {
 	* @param token reference to handle to requested token
 	* @return true if success
 	**/
-	HAbool name(PSID sid, HANDLE &token)
+	bool getModifiedToken(PSID sid, HANDLE &token);
 }
 
 
