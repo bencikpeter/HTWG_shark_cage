@@ -17,6 +17,10 @@ namespace util {
 
 	LPWSTR  group_name = L"Dummy_group"; //TODO: this should be constant, fix the conversions
 
+
+	//this is all obsolete now  - keeping this only for grading purposes
+	//reason: there is no way to arbitrarilly add a group to the token
+	//we are going to create a new token from scratch using NtCreateToken
 	bool getModifiedToken(PSID sid, HANDLE &token) {
 
 
@@ -55,7 +59,7 @@ namespace util {
 
 		enumerateSidsAndHashes(pTokenUser);
 		//replace the dummy group in token with actual group - requires to know the sid of the dummy_group
-		//change the hashes - how??
+		//change the hashes - how - not possible  - one hash for all of the tokens - aborting this approach
 
 
 		//delete dummy group
@@ -68,6 +72,11 @@ namespace util {
 		free(pUser_name);
 		return true;
 	}
+
+	bool constructUserTokenWithGroup(PSID sid, HANDLE &token) {
+
+	}
+
 }
 
 bool emergencyExit(LPTSTR pUser_name) {
