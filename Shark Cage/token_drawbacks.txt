@@ -1,0 +1,7 @@
+Drawback 1:
+also the service needs to run under different, not SYSTEM account
+reason: Cygwin states:
+the permission "Create a token object" gets explicitly removed from the SYSTEM user's access token,
+when starting services under that account. 
+That requires us to create a new account with this specific permission just to run this kind of services.
+
