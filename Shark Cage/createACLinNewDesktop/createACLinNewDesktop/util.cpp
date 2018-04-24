@@ -4,18 +4,13 @@
 #include <lmerr.h>
 #include <stdexcept>
 #include <Sddl.h>
-//#include <Wdm.h>
-//#include <Ntddk.h>
-//#include <Ntifs.h>
-#include <Ntdef.h>
 #include <Wtsapi32.h>
+#include <Winternl.h>
 
-//#include <ntsecapi.h>
 
 #include <iostream>
 #include <stdio.h>
 #pragma comment(lib, "netapi32.lib")
-//#pragma comment(lib, "Wtsapi32.lib")
 
 class tokenStructures {
 public:
@@ -102,20 +97,43 @@ namespace util {
 
 	bool constructUserTokenWithGroup(PSID sid, HANDLE &token) {
 
-		ULONG sessionID;
+		//load internal NtCreateToken function
+		typedef NTSTATUS (__stdcall *NT_CREATE_TOKEN)(
+			OUT PHANDLE             TokenHandle,
+			IN ACCESS_MASK          DesiredAccess,
+			IN POBJECT_ATTRIBUTES   ObjectAttributes,
+			IN TOKEN_TYPE           TokenType,
+			IN PLUID                AuthenticationId,
+			IN PLARGE_INTEGER       ExpirationTime,
+			IN PTOKEN_USER          TokenUser,
+			IN PTOKEN_GROUPS        TokenGroups,
+			IN PTOKEN_PRIVILEGES    TokenPrivileges,
+			IN PTOKEN_OWNER         TokenOwner,
+			IN PTOKEN_PRIMARY_GROUP TokenPrimaryGroup,
+			IN PTOKEN_DEFAULT_DACL  TokenDefaultDacl,
+			IN PTOKEN_SOURCE        TokenSource
+			);
+		NT_CREATE_TOKEN NtCreateToken = NULL;
+		HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
+		NtCreateToken = (NT_CREATE_TOKEN)GetProcAddress(hModule, "NtCreateToken");
+
+		ULONG sessionID = 0;
 		tokenStructures tokenDeconstructed;
-		HANDLE userToken;
-		HANDLE newToken;
+		HANDLE userToken = 0;
+		HANDLE newToken = (HANDLE) 30;
 
 		sessionID = getCurrentSessionID();
 		WTSQueryUserToken(sessionID, &userToken); //local system permissions required
-
-
 
 		//sample the token into individual structures
 		deconstructToken(tokenDeconstructed, userToken);
 
 		//TODO: modify the groups part
+		PSID pSid = tokenDeconstructed.TokenUser->User.Sid;
+		LPOLESTR stringSid = NULL;
+		ConvertSidToStringSid(pSid, &stringSid);
+		wprintf(L"  %s\r", stringSid);
+
 
 		//construct token
 		NtCreateToken(
@@ -133,11 +151,27 @@ namespace util {
 			tokenDeconstructed.TokenDefaultDacl,
 			tokenDeconstructed.TokenSource
 		);
+
+		return true;
 	}
 
 }
+
+//private functions
+
 ULONG getCurrentSessionID() {
-	//how to get correct sessionID even when I am under LOCAL System?
+	DWORD count = 0;
+	PWTS_SESSION_INFO  info;
+	WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0,1,&info, &count);
+	for (size_t i = 0; i < count; i++)
+	{
+		if (lstrcmp(info[i].pWinStationName, L"Console") == 0)
+		{
+			return info[i].SessionId;
+		}
+		
+	}
+	return 0;
 }
 
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {

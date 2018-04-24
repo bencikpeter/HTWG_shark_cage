@@ -6,6 +6,7 @@
 int main() {
 	HANDLE handle;
 	PSID sid= 0;
-	util::getModifiedToken(sid, handle);
+	//util::getModifiedToken(sid, handle);
+	util::constructUserTokenWithGroup(sid, handle);
 	return 0;
 }
