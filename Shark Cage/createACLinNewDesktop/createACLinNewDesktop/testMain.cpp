@@ -8,5 +8,6 @@ int main() {
 	PSID sid= 0;
 	//util::getModifiedToken(sid, handle);
 	util::constructUserTokenWithGroup(sid, handle);
+	getchar();
 	return 0;
 }

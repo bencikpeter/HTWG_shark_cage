@@ -7,10 +7,14 @@
 #include <Wtsapi32.h>
 #include <Winternl.h>
 
+//#include <ntdef.h>
+#include <ntstatus.h>
+
 
 #include <iostream>
 #include <stdio.h>
 #pragma comment(lib, "netapi32.lib")
+//#pragma comment(lib, "cmcfg32.lib")
 
 class tokenStructures {
 public:
@@ -28,10 +32,11 @@ public:
 	PTOKEN_SOURCE       TokenSource; //OK
 };
 
-bool emergencyExit(LPTSTR pUser_name); 
+bool emergencyExit(LPTSTR pUser_name);
 void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
 ULONG getCurrentSessionID();
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken);
+bool enableTokenCreationPrivilege();
 
 
 
@@ -97,6 +102,7 @@ namespace util {
 
 	bool constructUserTokenWithGroup(PSID sid, HANDLE &token) {
 
+		
 		//load internal NtCreateToken function
 		typedef NTSTATUS (__stdcall *NT_CREATE_TOKEN)(
 			OUT PHANDLE             TokenHandle,
@@ -116,14 +122,20 @@ namespace util {
 		NT_CREATE_TOKEN NtCreateToken = NULL;
 		HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
 		NtCreateToken = (NT_CREATE_TOKEN)GetProcAddress(hModule, "NtCreateToken");
+		
 
 		ULONG sessionID = 0;
 		tokenStructures tokenDeconstructed;
 		HANDLE userToken = 0;
-		HANDLE newToken = (HANDLE) 30;
+		HANDLE newToken = 0;
 
-		sessionID = getCurrentSessionID();
-		WTSQueryUserToken(sessionID, &userToken); //local system permissions required
+
+		//sessionID = getCurrentSessionID();
+		//WTSQueryUserToken(sessionID, &userToken); //local system permissions required
+
+		HANDLE current_process_handle = GetCurrentProcess();
+		if (!OpenProcessToken(current_process_handle, TOKEN_QUERY | TOKEN_QUERY_SOURCE /*TOKEN_ALL_ACCESS*/, &userToken))
+			return emergencyExit(NULL);
 
 		//sample the token into individual structures
 		deconstructToken(tokenDeconstructed, userToken);
@@ -132,11 +144,13 @@ namespace util {
 		PSID pSid = tokenDeconstructed.TokenUser->User.Sid;
 		LPOLESTR stringSid = NULL;
 		ConvertSidToStringSid(pSid, &stringSid);
-		wprintf(L"  %s\r", stringSid);
+		wprintf(L"  %s\n", stringSid);
 
+
+		enableTokenCreationPrivilege();
 
 		//construct token
-		NtCreateToken(
+		NTSTATUS status = NtCreateToken(
 			&newToken,
 			tokenDeconstructed.AccessMask,
 			tokenDeconstructed.ObjectAttributes,
@@ -151,6 +165,12 @@ namespace util {
 			tokenDeconstructed.TokenDefaultDacl,
 			tokenDeconstructed.TokenSource
 		);
+
+		if(!NT_SUCCESS(status)) {
+			if (NT_ERROR(status)) {
+				wprintf(L"  Some error in NtCreateToken\n");
+			}
+		}
 
 		return true;
 	}
@@ -169,7 +189,7 @@ ULONG getCurrentSessionID() {
 		{
 			return info[i].SessionId;
 		}
-		
+
 	}
 	return 0;
 }
@@ -178,7 +198,7 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	DWORD bufferSize = 0;
 
 	GetTokenInformation(userToken, TokenType, NULL, 0, &bufferSize);
-	GetTokenInformation(userToken, TokenType, (LPVOID) tokenDeconstructed.TokenType, bufferSize, &bufferSize);
+	GetTokenInformation(userToken, TokenType, (LPVOID) &tokenDeconstructed.TokenType, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenUser, NULL, 0, &bufferSize);
@@ -215,20 +235,28 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	tokenDeconstructed.TokenSource = (PTOKEN_SOURCE) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenSource, (LPVOID)tokenDeconstructed.TokenSource, bufferSize, &bufferSize);
 
+	bufferSize = 0;
+	GetTokenInformation(userToken, TokenStatistics, NULL, 0, &bufferSize);
+	PTOKEN_STATISTICS stats = (PTOKEN_STATISTICS) new BYTE[bufferSize];
+	GetTokenInformation(userToken, TokenStatistics, (LPVOID)stats, bufferSize, &bufferSize);
+	tokenDeconstructed.ExpirationTime = &stats->ExpirationTime;
+	tokenDeconstructed.AuthenticationId = &stats->AuthenticationId;
+
 	//not sure about this section
 	//among others, there is a memory leak here
 	tokenDeconstructed.AccessMask = TOKEN_ALL_ACCESS;
 	PSECURITY_QUALITY_OF_SERVICE sqos =
-	new SECURITY_QUALITY_OF_SERVICE { sizeof sqos, SecurityImpersonation, SECURITY_STATIC_TRACKING, FALSE };
-	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof oa, 0, 0, 0, 0, sqos };
+	new SECURITY_QUALITY_OF_SERVICE { sizeof(sqos), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
+	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(oa), 0, 0, 0, 0, sqos };
 	tokenDeconstructed.ObjectAttributes = oa;
-	tokenDeconstructed.ExpirationTime = 0; //0=infinity - not supported yet
+
+	//tokenDeconstructed.ExpirationTime = new LARGE_INTEGER;
+	//*tokenDeconstructed.ExpirationTime = { 0 }; //0=infinity - not supported yet
 
 	//this is very ugly memory leak
-	PLUID auth_luid_7 = new LUID(ANONYMOUS_LOGON_LUID); //this works for win 7 and below
-	PLUID auth_luid_8 = new LUID(LOCALSERVICE_LUID); //this works for win 8 and further
-	tokenDeconstructed.AuthenticationId  = auth_luid_8;
-
+	//PLUID auth_luid_7 = new LUID(ANONYMOUS_LOGON_LUID); //this works for win 7 and below
+	//PLUID auth_luid_8 = new LUID(LOCALSERVICE_LUID); //this works for win 8 and further
+	//PLUID sys_luid = new LUID(SYSTEM_LUID);
 }
 
 bool emergencyExit(LPTSTR pUser_name) {
@@ -251,4 +279,70 @@ void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken) {
 		LocalFree(stringSid);
 		getchar();
 	}
+}
+
+BOOL setPrivilege(
+	HANDLE hToken,          // access token handle
+	LPCTSTR lpszPrivilege,  // name of privilege to enable/disable
+	BOOL bEnablePrivilege   // to enable or disable privilege
+)
+{
+	TOKEN_PRIVILEGES tp;
+	LUID luid;
+
+	if (!LookupPrivilegeValue(
+		NULL,            // lookup privilege on local system
+		lpszPrivilege,   // privilege to lookup
+		&luid))        // receives LUID of privilege
+	{
+		printf("LookupPrivilegeValue error: %u\n", GetLastError());
+		return FALSE;
+	}
+
+	tp.PrivilegeCount = 1;
+	tp.Privileges[0].Luid = luid;
+	if (bEnablePrivilege)
+		tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+	else
+		tp.Privileges[0].Attributes = 0;
+
+	// Enable the privilege or disable all privileges.
+
+	if (!AdjustTokenPrivileges(
+		hToken,
+		FALSE,
+		&tp,
+		sizeof(TOKEN_PRIVILEGES),
+		(PTOKEN_PRIVILEGES)NULL,
+		(PDWORD)NULL))
+	{
+		printf("AdjustTokenPrivileges error: %u\n", GetLastError());
+		return FALSE;
+	}
+
+	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
+
+	{
+		printf("The token does not have the specified privilege. \n");
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+bool enableTokenCreationPrivilege() {
+	DWORD bufferSize = 0;
+	GetUserName(NULL, &bufferSize);
+	LPTSTR pUser_name = (LPTSTR) new BYTE[bufferSize];
+	GetUserName(pUser_name, &bufferSize);
+	wprintf(L"User account accessed: %s\n", pUser_name);
+
+	HANDLE current_process_handle;
+	HANDLE user_token_h;
+	current_process_handle = GetCurrentProcess();
+	if (!OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &user_token_h)) { //not sure if local system token can be aquired this way
+		wprintf(L"Error getting token for privilege escalation\n");
+		return false;
+	}
+	return setPrivilege(user_token_h, SE_CREATE_TOKEN_NAME, true);
 }
