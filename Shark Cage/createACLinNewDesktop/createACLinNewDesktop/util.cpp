@@ -125,39 +125,21 @@ namespace util {
 		HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
 		NtCreateToken = (NT_CREATE_TOKEN)GetProcAddress(hModule, "NtCreateToken");
 
-
-		//load internal NtAllocateLocallyUniqueId 
-		NTSYSAPI NTSTATUS NTAPI NtAllocateLocallyUniqueId (
-			OUT PLUID Luid
-			);
-
 		ULONG sessionID = 0;
 		tokenStructures tokenDeconstructed;
 		HANDLE userToken = 0;
 		HANDLE newToken = 0;
 
 
-		//NOTE: possible cause of NtCreateToken failing is wrong token opening method 
-		//sessionID = getCurrentSessionID();
-		//WTSQueryUserToken(sessionID, &userToken); //local system permissions required
-
 		HANDLE current_process_handle = GetCurrentProcess();
-		if (!OpenProcessToken(current_process_handle, /*TOKEN_QUERY | TOKEN_QUERY_SOURCE*/ TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, &userToken))
+		if (!OpenProcessToken(current_process_handle, TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, &userToken))
 			return emergencyExit(NULL);
 
 		//sample the token into individual structures
 		deconstructToken(tokenDeconstructed, userToken);
 
 		//TODO: modify the groups part
-		PSID pSid = tokenDeconstructed.TokenUser->User.Sid;
-		LPOLESTR stringSid = NULL;
-		ConvertSidToStringSid(pSid, &stringSid);
-		wprintf(L"  %s\n", stringSid);
 
-		pSid = tokenDeconstructed.TokenPrimaryGroup->PrimaryGroup;
-		stringSid = NULL;
-		ConvertSidToStringSid(pSid, &stringSid);
-		wprintf(L"  %s\n", stringSid);
 
 
 		enableTokenCreationPrivilege();
@@ -185,6 +167,7 @@ namespace util {
 			}
 		}
 
+		token = newToken;
 		return true;
 	}
 
@@ -262,36 +245,14 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	PTOKEN_STATISTICS stats = (PTOKEN_STATISTICS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenStatistics, (LPVOID)stats, bufferSize, &bufferSize);
 	tokenDeconstructed.ExpirationTime = &stats->ExpirationTime;
-
-
-	//AuthenticationId might be allocated with yet another undocumented function
 	tokenDeconstructed.AuthenticationId = &stats->AuthenticationId;
-	//tokenDeconstructed.AuthenticationId = new LUID;
-	//NTSTATUS status2 = AllocateLocallyUniqueId(tokenDeconstructed.AuthenticationId);
-
-
 
 	tokenDeconstructed.AccessMask = TOKEN_ALL_ACCESS;
-
-	//not sure about this section
-	//TODO: probably the reason why NtCreateToken fails
-	/*
-	PSECURITY_QUALITY_OF_SERVICE sqos =
-	new SECURITY_QUALITY_OF_SERVICE { sizeof(sqos), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
-	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(oa), 0, 0, 0, 0, sqos };
-	tokenDeconstructed.ObjectAttributes = oa;
-	*/
 
 	PSECURITY_QUALITY_OF_SERVICE sqos =
 		new SECURITY_QUALITY_OF_SERVICE{ sizeof(SECURITY_QUALITY_OF_SERVICE), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
 	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(OBJECT_ATTRIBUTES), 0, 0, 0, 0, sqos };
 	tokenDeconstructed.ObjectAttributes = oa;
-
-
-	//this is very ugly memory leak
-	//PLUID auth_luid_7 = new LUID(ANONYMOUS_LOGON_LUID); //this works for win 7 and below
-	//PLUID auth_luid_8 = new LUID(LOCALSERVICE_LUID); //this works for win 8 and further
-	//PLUID sys_luid = new LUID(SYSTEM_LUID);
 }
 
 bool emergencyExit(LPTSTR pUser_name) {
