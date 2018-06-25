@@ -37,6 +37,7 @@ void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
 ULONG getCurrentSessionID();
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken);
 bool enableTokenCreationPrivilege();
+bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed);
 
 
 
@@ -104,8 +105,6 @@ namespace util {
 
 		
 		//load internal NtCreateToken function
-
-
 		typedef NTSTATUS (__stdcall *NT_CREATE_TOKEN)(
 			OUT PHANDLE             TokenHandle,
 			IN ACCESS_MASK          DesiredAccess,
@@ -139,7 +138,10 @@ namespace util {
 		deconstructToken(tokenDeconstructed, userToken);
 
 		//TODO: modify the groups part
-
+		if (!addGroupToTokenGroups(sid, tokenDeconstructed)){
+			wprintf(L"  Some error in adding group to token\n");
+			return false;
+		}
 
 
 		enableTokenCreationPrivilege();
@@ -164,6 +166,7 @@ namespace util {
 		if(!NT_SUCCESS(status)) {
 			if (NT_ERROR(status)) {
 				wprintf(L"  Some error in NtCreateToken\n");
+				return false;
 			}
 		}
 
@@ -341,4 +344,22 @@ bool enableTokenCreationPrivilege() {
 		return false;
 	}
 	return setPrivilege(user_token_h, SE_CREATE_TOKEN_NAME, true);
+}
+
+bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed) {
+	PTOKEN_GROUPS tokenGroups = tokenDeconstructed.TokenGroups;
+	DWORD groupCount = tokenGroups->GroupCount;
+	SID_AND_ATTRIBUTES newGroup{ sid, SE_GROUP_ENABLED };
+
+	PTOKEN_GROUPS tokenGroupsMod = (PTOKEN_GROUPS)malloc(FIELD_OFFSET(TOKEN_GROUPS, Groups[groupCount+1]));
+	for (size_t i = 0; i < groupCount; i++)
+	{
+		tokenGroupsMod->Groups[i] = tokenGroups->Groups[i];
+	}
+	tokenGroupsMod->Groups[groupCount] = newGroup;
+	tokenGroupsMod->GroupCount = groupCount + 1;
+
+	tokenDeconstructed.TokenGroups = tokenGroupsMod;
+
+	return true;
 }
