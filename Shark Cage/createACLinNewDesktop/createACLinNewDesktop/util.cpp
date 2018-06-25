@@ -104,6 +104,8 @@ namespace util {
 
 		
 		//load internal NtCreateToken function
+
+
 		typedef NTSTATUS (__stdcall *NT_CREATE_TOKEN)(
 			OUT PHANDLE             TokenHandle,
 			IN ACCESS_MASK          DesiredAccess,
@@ -122,7 +124,12 @@ namespace util {
 		NT_CREATE_TOKEN NtCreateToken = NULL;
 		HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
 		NtCreateToken = (NT_CREATE_TOKEN)GetProcAddress(hModule, "NtCreateToken");
-		
+
+
+		//load internal NtAllocateLocallyUniqueId 
+		NTSYSAPI NTSTATUS NTAPI NtAllocateLocallyUniqueId (
+			OUT PLUID Luid
+			);
 
 		ULONG sessionID = 0;
 		tokenStructures tokenDeconstructed;
@@ -130,11 +137,12 @@ namespace util {
 		HANDLE newToken = 0;
 
 
+		//NOTE: possible cause of NtCreateToken failing is wrong token opening method 
 		//sessionID = getCurrentSessionID();
 		//WTSQueryUserToken(sessionID, &userToken); //local system permissions required
 
 		HANDLE current_process_handle = GetCurrentProcess();
-		if (!OpenProcessToken(current_process_handle, TOKEN_QUERY | TOKEN_QUERY_SOURCE /*TOKEN_ALL_ACCESS*/, &userToken))
+		if (!OpenProcessToken(current_process_handle, /*TOKEN_QUERY | TOKEN_QUERY_SOURCE*/ TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, &userToken))
 			return emergencyExit(NULL);
 
 		//sample the token into individual structures
@@ -143,6 +151,11 @@ namespace util {
 		//TODO: modify the groups part
 		PSID pSid = tokenDeconstructed.TokenUser->User.Sid;
 		LPOLESTR stringSid = NULL;
+		ConvertSidToStringSid(pSid, &stringSid);
+		wprintf(L"  %s\n", stringSid);
+
+		pSid = tokenDeconstructed.TokenPrimaryGroup->PrimaryGroup;
+		stringSid = NULL;
 		ConvertSidToStringSid(pSid, &stringSid);
 		wprintf(L"  %s\n", stringSid);
 
@@ -198,60 +211,82 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	DWORD bufferSize = 0;
 
 	GetTokenInformation(userToken, TokenType, NULL, 0, &bufferSize);
+	SetLastError(0);
 	GetTokenInformation(userToken, TokenType, (LPVOID) &tokenDeconstructed.TokenType, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenUser, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenUser = (PTOKEN_USER) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenUser, (LPVOID) tokenDeconstructed.TokenUser, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenGroups, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenGroups = (PTOKEN_GROUPS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenGroups, (LPVOID)tokenDeconstructed.TokenGroups, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenPrivileges, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenPrivileges = (PTOKEN_PRIVILEGES) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenPrivileges, (LPVOID)tokenDeconstructed.TokenPrivileges, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenOwner, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenOwner = (PTOKEN_OWNER) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenOwner, (LPVOID)tokenDeconstructed.TokenOwner, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenPrimaryGroup, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenPrimaryGroup = (PTOKEN_PRIMARY_GROUP) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenPrimaryGroup, (LPVOID)tokenDeconstructed.TokenPrimaryGroup, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenDefaultDacl, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenDefaultDacl = (PTOKEN_DEFAULT_DACL) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenDefaultDacl, (LPVOID)tokenDeconstructed.TokenDefaultDacl, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenSource, NULL, 0, &bufferSize);
+	SetLastError(0);
 	tokenDeconstructed.TokenSource = (PTOKEN_SOURCE) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenSource, (LPVOID)tokenDeconstructed.TokenSource, bufferSize, &bufferSize);
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenStatistics, NULL, 0, &bufferSize);
+	SetLastError(0);
 	PTOKEN_STATISTICS stats = (PTOKEN_STATISTICS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenStatistics, (LPVOID)stats, bufferSize, &bufferSize);
 	tokenDeconstructed.ExpirationTime = &stats->ExpirationTime;
+
+
+	//AuthenticationId might be allocated with yet another undocumented function
 	tokenDeconstructed.AuthenticationId = &stats->AuthenticationId;
+	//tokenDeconstructed.AuthenticationId = new LUID;
+	//NTSTATUS status2 = AllocateLocallyUniqueId(tokenDeconstructed.AuthenticationId);
+
+
+
+	tokenDeconstructed.AccessMask = TOKEN_ALL_ACCESS;
 
 	//not sure about this section
-	//among others, there is a memory leak here
-	tokenDeconstructed.AccessMask = TOKEN_ALL_ACCESS;
+	//TODO: probably the reason why NtCreateToken fails
+	/*
 	PSECURITY_QUALITY_OF_SERVICE sqos =
 	new SECURITY_QUALITY_OF_SERVICE { sizeof(sqos), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
 	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(oa), 0, 0, 0, 0, sqos };
 	tokenDeconstructed.ObjectAttributes = oa;
+	*/
 
-	//tokenDeconstructed.ExpirationTime = new LARGE_INTEGER;
-	//*tokenDeconstructed.ExpirationTime = { 0 }; //0=infinity - not supported yet
+	PSECURITY_QUALITY_OF_SERVICE sqos =
+		new SECURITY_QUALITY_OF_SERVICE{ sizeof(SECURITY_QUALITY_OF_SERVICE), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
+	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(OBJECT_ATTRIBUTES), 0, 0, 0, 0, sqos };
+	tokenDeconstructed.ObjectAttributes = oa;
+
 
 	//this is very ugly memory leak
 	//PLUID auth_luid_7 = new LUID(ANONYMOUS_LOGON_LUID); //this works for win 7 and below
