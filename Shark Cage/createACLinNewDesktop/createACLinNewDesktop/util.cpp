@@ -6,15 +6,10 @@
 #include <Sddl.h>
 #include <Wtsapi32.h>
 #include <Winternl.h>
-
-//#include <ntdef.h>
 #include <ntstatus.h>
-
-
 #include <iostream>
 #include <stdio.h>
 #pragma comment(lib, "netapi32.lib")
-//#pragma comment(lib, "cmcfg32.lib")
 
 class tokenStructures {
 public:
@@ -32,80 +27,51 @@ public:
 	PTOKEN_SOURCE       TokenSource; //OK
 };
 
-bool emergencyExit(LPTSTR pUser_name);
 void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
 ULONG getCurrentSessionID();
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken);
-bool enableTokenCreationPrivilege();
+bool changeTokenCreationPrivilege(bool privilegeStatus);
 bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed);
 
 
 
 namespace util {
 
-	LPWSTR  group_name = L"Dummy_group"; //TODO: this should be constant, fix the conversions
-
-
-	//this is all obsolete now  - keeping this only for grading purposes
-	//reason: there is no way to arbitrarilly add a group to the token
-	//we are going to create a new token from scratch using NtCreateToken
-	bool getModifiedToken(PSID sid, HANDLE &token) {
-
-
+	bool createLocalGroup(LPWSTR groupName, PSID &sid){
+		SID_NAME_USE accountType;
 		LOCALGROUP_INFO_0 localgroup_info;
-		LPTSTR   pUser_name = NULL;
-		HANDLE current_process_handle;
-		HANDLE user_token_h;
-		DWORD bufferSize = 0;
+		localgroup_info.lgrpi0_name = groupName;
 
+		NetLocalGroupDel(NULL, groupName);
 
-		//create a dummy group
-		localgroup_info.lgrpi0_name = group_name;
-		if (NetLocalGroupAdd(NULL, 0, (LPBYTE)&localgroup_info, NULL) != NERR_Success)
-			return emergencyExit(pUser_name);
+		if (NetLocalGroupAdd(NULL, 0, (LPBYTE)&localgroup_info, NULL) != NERR_Success) {
+			sid = NULL;
+			return false;
+		}
 
+		DWORD bufferSize = 0, buffer2Size = 0;
 
-		//add user to that group
-		GetUserName(NULL, &bufferSize);
-		pUser_name = (LPTSTR) new BYTE[bufferSize];
-		GetUserName(pUser_name, &bufferSize);
-		LOCALGROUP_MEMBERS_INFO_3 localgroup_member_info;
-		localgroup_member_info.lgrmi3_domainandname = pUser_name;
-		if (NetLocalGroupAddMembers(NULL, group_name, 3, (LPBYTE)&localgroup_member_info, 1) != NERR_Success)
-			return emergencyExit(pUser_name);
+		LookupAccountName(NULL, groupName, NULL, &bufferSize, NULL, &buffer2Size, &accountType);
+		sid = (PSID) new BYTE[bufferSize];
+		LPTSTR domain = (LPTSTR) new BYTE[buffer2Size];
+		if (!LookupAccountName(NULL, groupName, sid, &bufferSize, domain, &buffer2Size, &accountType)) {
+			NetLocalGroupDel(NULL, groupName);
+			sid = NULL;
+			return false;
+		}
+		return true;
+	}
 
-		//get user token (containig dummy group) - TODO: I need handle of a different process this one does not have the priviledge
-		current_process_handle = GetCurrentProcess();
-		if (!OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &user_token_h))
-			return emergencyExit(pUser_name);
-
-		bufferSize = 0;
-		GetTokenInformation(user_token_h, TokenAccessInformation, NULL, 0, &bufferSize);
-		PTOKEN_ACCESS_INFORMATION pTokenUser = (PTOKEN_ACCESS_INFORMATION) new BYTE[bufferSize];
-		memset(pTokenUser, 0, bufferSize);
-		GetTokenInformation(user_token_h, TokenAccessInformation, pTokenUser, bufferSize, &bufferSize);
-
-		enumerateSidsAndHashes(pTokenUser);
-		//replace the dummy group in token with actual group - requires to know the sid of the dummy_group
-		//change the hashes - how - not possible  - one hash for all of the tokens - aborting this approach
-
-
-		//delete dummy group
-		NetLocalGroupDel(NULL, group_name);
-
-		//assign token to handle
-
-
-		//exit sequence
-		free(pUser_name);
+	bool deleteLocalGroup(LPWSTR groupName) {
+		if(NetLocalGroupDel(NULL, groupName) != NERR_Success)
+			return false;
 		return true;
 	}
 
 	bool constructUserTokenWithGroup(PSID sid, HANDLE &token) {
 
-		
 		//load internal NtCreateToken function
-		typedef NTSTATUS (__stdcall *NT_CREATE_TOKEN)(
+		typedef NTSTATUS(__stdcall *NT_CREATE_TOKEN)(
 			OUT PHANDLE             TokenHandle,
 			IN ACCESS_MASK          DesiredAccess,
 			IN POBJECT_ATTRIBUTES   ObjectAttributes,
@@ -124,27 +90,32 @@ namespace util {
 		HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
 		NtCreateToken = (NT_CREATE_TOKEN)GetProcAddress(hModule, "NtCreateToken");
 
-		ULONG sessionID = 0;
 		tokenStructures tokenDeconstructed;
 		HANDLE userToken = 0;
 		HANDLE newToken = 0;
 
 
 		HANDLE current_process_handle = GetCurrentProcess();
-		if (!OpenProcessToken(current_process_handle, TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, &userToken))
-			return emergencyExit(NULL);
+		if (!OpenProcessToken(current_process_handle, TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, &userToken)) {
+			wprintf(L"  Cannot aquire template token\n");
+			return false;
+		}
+			
 
 		//sample the token into individual structures
 		deconstructToken(tokenDeconstructed, userToken);
 
-		//TODO: modify the groups part
+		//add desired group to the token
 		if (!addGroupToTokenGroups(sid, tokenDeconstructed)){
-			wprintf(L"  Some error in adding group to token\n");
+			wprintf(L"  Cannot add group to a token\n");
 			return false;
 		}
 
-
-		enableTokenCreationPrivilege();
+		//enable needed privileges
+		if (!changeTokenCreationPrivilege(true)) {
+			wprintf(L"  Cannot aquire needed privileges\n");
+			return false;
+		}
 
 		//construct token
 		NTSTATUS status = NtCreateToken(
@@ -163,9 +134,12 @@ namespace util {
 			tokenDeconstructed.TokenSource
 		);
 
+		//disable needed privileges
+		changeTokenCreationPrivilege(false);
+
 		if(!NT_SUCCESS(status)) {
 			if (NT_ERROR(status)) {
-				wprintf(L"  Some error in NtCreateToken\n");
+				wprintf(L"  Cannot construct a token\n");
 				return false;
 			}
 		}
@@ -193,9 +167,10 @@ ULONG getCurrentSessionID() {
 	return 0;
 }
 
+//deconstructs the template token
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
-	DWORD bufferSize = 0;
 
+	DWORD bufferSize = 0;
 	GetTokenInformation(userToken, TokenType, NULL, 0, &bufferSize);
 	SetLastError(0);
 	GetTokenInformation(userToken, TokenType, (LPVOID) &tokenDeconstructed.TokenType, bufferSize, &bufferSize);
@@ -258,11 +233,6 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	tokenDeconstructed.ObjectAttributes = oa;
 }
 
-bool emergencyExit(LPTSTR pUser_name) {
-	NetLocalGroupDel(NULL, util::group_name);
-	free(pUser_name);
-	return false;
-}
 
 void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken) {
 	PSID_AND_ATTRIBUTES_HASH hashes = pToken->SidHash;
@@ -329,7 +299,7 @@ BOOL setPrivilege(
 	return TRUE;
 }
 
-bool enableTokenCreationPrivilege() {
+bool changeTokenCreationPrivilege(bool privilegeStatus) {
 	DWORD bufferSize = 0;
 	GetUserName(NULL, &bufferSize);
 	LPTSTR pUser_name = (LPTSTR) new BYTE[bufferSize];
@@ -343,7 +313,7 @@ bool enableTokenCreationPrivilege() {
 		wprintf(L"Error getting token for privilege escalation\n");
 		return false;
 	}
-	return setPrivilege(user_token_h, SE_CREATE_TOKEN_NAME, true);
+	return setPrivilege(user_token_h, SE_CREATE_TOKEN_NAME, privilegeStatus);
 }
 
 bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed) {
