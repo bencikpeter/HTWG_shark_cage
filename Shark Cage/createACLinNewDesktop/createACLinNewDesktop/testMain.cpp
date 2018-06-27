@@ -13,8 +13,8 @@ int main() {
 
 	PSID sid = 0;
 
-	util::createLocalGroup(group_name, sid);
-	util::constructUserTokenWithGroup(sid, handle);
+	tokenLib::createLocalGroup(group_name, sid);
+	tokenLib::constructUserTokenWithGroup(sid, handle);
 
 
 	//surface all the groups to the console - just to demonstrate that a token has selected group in it.
@@ -37,7 +37,7 @@ int main() {
 		free(domain);
 	}
 
-	util::deleteLocalGroup(group_name);
+	tokenLib::deleteLocalGroup(group_name);
 	getchar();
 	return 0;
 }

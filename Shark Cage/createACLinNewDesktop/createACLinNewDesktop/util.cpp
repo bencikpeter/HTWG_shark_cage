@@ -13,18 +13,18 @@
 
 class tokenStructures {
 public:
-	ACCESS_MASK			AccessMask; //OK
-	POBJECT_ATTRIBUTES	ObjectAttributes; //OK
-	TOKEN_TYPE			TokenType; //OK
-	PLUID				AuthenticationId; //OK
-	PLARGE_INTEGER		ExpirationTime; //OK
-	PTOKEN_USER         TokenUser; //OK
-	PTOKEN_GROUPS       TokenGroups; //OK
-	PTOKEN_PRIVILEGES   TokenPrivileges; //OK
-	PTOKEN_OWNER        TokenOwner; //OK
-	PTOKEN_PRIMARY_GROUP TokenPrimaryGroup; //OK
-	PTOKEN_DEFAULT_DACL TokenDefaultDacl; //OK
-	PTOKEN_SOURCE       TokenSource; //OK
+	ACCESS_MASK			AccessMask;
+	POBJECT_ATTRIBUTES	ObjectAttributes;
+	TOKEN_TYPE			TokenType;
+	PLUID				AuthenticationId;
+	PLARGE_INTEGER		ExpirationTime;
+	PTOKEN_USER         TokenUser;
+	PTOKEN_GROUPS       TokenGroups;
+	PTOKEN_PRIVILEGES   TokenPrivileges;
+	PTOKEN_OWNER        TokenOwner;
+	PTOKEN_PRIMARY_GROUP TokenPrimaryGroup;
+	PTOKEN_DEFAULT_DACL TokenDefaultDacl;
+	PTOKEN_SOURCE       TokenSource;
 };
 
 void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
@@ -35,7 +35,7 @@ bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed);
 
 
 
-namespace util {
+namespace tokenLib {
 
 	bool createLocalGroup(LPWSTR groupName, PSID &sid){
 		SID_NAME_USE accountType;
@@ -250,6 +250,7 @@ void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken) {
 	}
 }
 
+//adopted from MSDN example
 BOOL setPrivilege(
 	HANDLE hToken,          // access token handle
 	LPCTSTR lpszPrivilege,  // name of privilege to enable/disable
@@ -309,7 +310,7 @@ bool changeTokenCreationPrivilege(bool privilegeStatus) {
 	HANDLE current_process_handle;
 	HANDLE user_token_h;
 	current_process_handle = GetCurrentProcess();
-	if (!OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &user_token_h)) { //not sure if local system token can be aquired this way
+	if (!OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &user_token_h)) {
 		wprintf(L"Error getting token for privilege escalation\n");
 		return false;
 	}

@@ -10,7 +10,7 @@
 #include <Windows.h>
 
 
-namespace util {
+namespace tokenLib {
 	/**
 	* Function gets a SID of a group and creates a token with a group entry added in the token
 	* Source of the token is the token of the process itself. Returned token is identical to the calling process token, just includes one more group
@@ -32,7 +32,7 @@ namespace util {
 	/**
 	* Creates a new local group with a name groupName and returns it´s SID
 	* @param groupName string literal representing the name of the group (IN)
-	* @param sid reference to the new group sid (OUT)
+	* @param sid reference to the new group sid, NULL if function fails (OUT)
 	* @return true if success
 	**/
 	bool createLocalGroup(LPWSTR groupName, PSID &sid);
