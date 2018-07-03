@@ -12,22 +12,22 @@
 int main() {
 	LPWSTR  group_name = L"Dummy_group_testing_token_mod";
 	SID_NAME_USE accountType;
-	HANDLE handle = 0;
+	HANDLE modifiedTokenHandle = 0;
 
 
-	PSID sid = 0;
+	PSID newGroupSid = 0;
 
-	tokenLib::createLocalGroup(group_name, sid);
-	tokenLib::constructUserTokenWithGroup(sid, handle);
-	delete[](BYTE*) sid;
+	tokenLib::createLocalGroup(group_name, newGroupSid);
+	tokenLib::constructUserTokenWithGroup(newGroupSid, modifiedTokenHandle);
+	delete[](BYTE*) newGroupSid;
 
 
 	//surface all the groups to the console - just to demonstrate that a token has selected group in it.
 	DWORD bufferSize = 0, buffer2Size = 0;
-	GetTokenInformation(handle, TokenGroups, NULL, 0, &bufferSize);
+	GetTokenInformation(modifiedTokenHandle, TokenGroups, NULL, 0, &bufferSize);
 	SetLastError(0);
 	PTOKEN_GROUPS groups = (PTOKEN_GROUPS) new BYTE[bufferSize];
-	GetTokenInformation(handle, TokenGroups, (LPVOID)groups, bufferSize, &bufferSize);
+	GetTokenInformation(modifiedTokenHandle, TokenGroups, (LPVOID)groups, bufferSize, &bufferSize);
 	for (size_t i = 0; i < groups->GroupCount; i++)
 	{
 		bufferSize = 0;
