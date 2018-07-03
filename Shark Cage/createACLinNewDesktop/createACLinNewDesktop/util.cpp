@@ -30,9 +30,9 @@ public:
 void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
 ULONG getCurrentSessionID();
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken);
+void deallocateToken(tokenStructures &tokenDeconstructed);
 bool changeTokenCreationPrivilege(bool privilegeStatus);
-bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed);
-
+bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed, PTOKEN_GROUPS &newGroups);
 
 
 namespace tokenLib {
@@ -53,12 +53,15 @@ namespace tokenLib {
 
 		LookupAccountName(NULL, groupName, NULL, &bufferSize, NULL, &buffer2Size, &accountType);
 		sid = (PSID) new BYTE[bufferSize];
-		LPTSTR domain = (LPTSTR) new BYTE[buffer2Size];
+		LPTSTR domain = (LPTSTR) new BYTE[buffer2Size * sizeof(TCHAR)];
 		if (!LookupAccountName(NULL, groupName, sid, &bufferSize, domain, &buffer2Size, &accountType)) {
 			NetLocalGroupDel(NULL, groupName);
+			delete[](BYTE*) sid;
+			delete[](BYTE*) domain;
 			sid = NULL;
 			return false;
 		}
+		delete[](BYTE*) domain;
 		return true;
 	}
 
@@ -106,7 +109,8 @@ namespace tokenLib {
 		deconstructToken(tokenDeconstructed, userToken);
 
 		//add desired group to the token
-		if (!addGroupToTokenGroups(sid, tokenDeconstructed)){
+		PTOKEN_GROUPS modifiedGroups = NULL;
+		if (!addGroupToTokenGroups(sid, tokenDeconstructed, modifiedGroups)){
 			wprintf(L"  Cannot add group to a token\n");
 			return false;
 		}
@@ -126,7 +130,7 @@ namespace tokenLib {
 			tokenDeconstructed.AuthenticationId,
 			tokenDeconstructed.ExpirationTime,
 			tokenDeconstructed.TokenUser,
-			tokenDeconstructed.TokenGroups,
+			modifiedGroups,
 			tokenDeconstructed.TokenPrivileges,
 			tokenDeconstructed.TokenOwner,
 			tokenDeconstructed.TokenPrimaryGroup,
@@ -134,8 +138,10 @@ namespace tokenLib {
 			tokenDeconstructed.TokenSource
 		);
 
-		//disable needed privileges
+		//cleanup
 		changeTokenCreationPrivilege(false);
+		deallocateToken(tokenDeconstructed);
+		delete[](BYTE*) modifiedGroups;
 
 		if(!NT_SUCCESS(status)) {
 			if (NT_ERROR(status)) {
@@ -222,8 +228,11 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 	SetLastError(0);
 	PTOKEN_STATISTICS stats = (PTOKEN_STATISTICS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenStatistics, (LPVOID)stats, bufferSize, &bufferSize);
-	tokenDeconstructed.ExpirationTime = &stats->ExpirationTime;
-	tokenDeconstructed.AuthenticationId = &stats->AuthenticationId;
+
+	tokenDeconstructed.ExpirationTime = new LARGE_INTEGER{ stats->ExpirationTime };
+	tokenDeconstructed.AuthenticationId = new LUID{ stats->AuthenticationId };
+
+	
 
 	tokenDeconstructed.AccessMask = TOKEN_ALL_ACCESS;
 
@@ -231,6 +240,8 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 		new SECURITY_QUALITY_OF_SERVICE{ sizeof(SECURITY_QUALITY_OF_SERVICE), stats->ImpersonationLevel, SECURITY_STATIC_TRACKING, FALSE };
 	POBJECT_ATTRIBUTES oa = new OBJECT_ATTRIBUTES{ sizeof(OBJECT_ATTRIBUTES), 0, 0, 0, 0, sqos };
 	tokenDeconstructed.ObjectAttributes = oa;
+
+	delete[](BYTE*) stats;
 }
 
 
@@ -303,9 +314,11 @@ BOOL setPrivilege(
 bool changeTokenCreationPrivilege(bool privilegeStatus) {
 	DWORD bufferSize = 0;
 	GetUserName(NULL, &bufferSize);
-	LPTSTR pUser_name = (LPTSTR) new BYTE[bufferSize];
+	LPTSTR pUser_name = (LPTSTR) new BYTE[bufferSize * sizeof(TCHAR)];
 	GetUserName(pUser_name, &bufferSize);
 	wprintf(L"User account accessed: %s\n", pUser_name);
+
+	delete[](BYTE*) pUser_name;
 
 	HANDLE current_process_handle;
 	HANDLE user_token_h;
@@ -317,7 +330,7 @@ bool changeTokenCreationPrivilege(bool privilegeStatus) {
 	return setPrivilege(user_token_h, SE_CREATE_TOKEN_NAME, privilegeStatus);
 }
 
-bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed) {
+bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed, PTOKEN_GROUPS &newGroups) {
 	PTOKEN_GROUPS tokenGroups = tokenDeconstructed.TokenGroups;
 	DWORD groupCount = tokenGroups->GroupCount;
 	SID_AND_ATTRIBUTES newGroup{ sid, SE_GROUP_ENABLED };
@@ -330,7 +343,21 @@ bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed) {
 	tokenGroupsMod->Groups[groupCount] = newGroup;
 	tokenGroupsMod->GroupCount = groupCount + 1;
 
-	tokenDeconstructed.TokenGroups = tokenGroupsMod;
+	newGroups = tokenGroupsMod;
 
 	return true;
+}
+
+void deallocateToken(tokenStructures &tokenDeconstructed) {
+	delete tokenDeconstructed.ObjectAttributes->SecurityQualityOfService;
+	delete tokenDeconstructed.ObjectAttributes;
+	delete tokenDeconstructed.AuthenticationId;
+	delete tokenDeconstructed.ExpirationTime;
+	delete[](BYTE*) tokenDeconstructed.TokenUser;
+	delete[](BYTE*) tokenDeconstructed.TokenGroups;
+	delete[](BYTE*) tokenDeconstructed.TokenPrivileges;
+	delete[](BYTE*) tokenDeconstructed.TokenOwner;
+	delete[](BYTE*) tokenDeconstructed.TokenPrimaryGroup;
+	delete[](BYTE*) tokenDeconstructed.TokenDefaultDacl;
+	delete[](BYTE*) tokenDeconstructed.TokenSource;
 }

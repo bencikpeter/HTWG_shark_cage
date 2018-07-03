@@ -5,6 +5,10 @@
 #include <lmerr.h>
 #include "util.h"
 
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+
 int main() {
 	LPWSTR  group_name = L"Dummy_group_testing_token_mod";
 	SID_NAME_USE accountType;
@@ -15,6 +19,7 @@ int main() {
 
 	tokenLib::createLocalGroup(group_name, sid);
 	tokenLib::constructUserTokenWithGroup(sid, handle);
+	delete[](BYTE*) sid;
 
 
 	//surface all the groups to the console - just to demonstrate that a token has selected group in it.
@@ -33,11 +38,15 @@ int main() {
 		LookupAccountSid(NULL, groups->Groups[i].Sid, name, &bufferSize, domain, &buffer2Size, &accountType);
 
 		wprintf(L"%s\n",name);
-		free(name);
-		free(domain);
+		delete[](BYTE*) name;
+		delete[](BYTE*) domain;
 	}
+
+	delete[](BYTE*) groups;
 
 	tokenLib::deleteLocalGroup(group_name);
 	getchar();
+
+	_CrtDumpMemoryLeaks();
 	return 0;
 }
