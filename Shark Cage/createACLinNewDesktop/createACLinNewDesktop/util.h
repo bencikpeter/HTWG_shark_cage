@@ -30,7 +30,7 @@ namespace tokenLib {
 	//one more alternative is just to outsource the token aqusition and just take a handle to the template token as an input parameter
 
 	/**
-	* Creates a new local group with a name groupName and returns it´s SID
+	* Creates a new local group with a name groupName and returns it´s SID. Deallocation of returned SID is a responsibility of the caller (use delete[](BYTE*))
 	* @param groupName string literal representing the name of the group (IN)
 	* @param sid reference to the new group sid, NULL if function fails (OUT)
 	* @return true if success

@@ -27,7 +27,6 @@ public:
 	PTOKEN_SOURCE       TokenSource;
 };
 
-void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken);
 ULONG getCurrentSessionID();
 void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken);
 void deallocateToken(tokenStructures &tokenDeconstructed);
@@ -42,9 +41,11 @@ namespace tokenLib {
 		LOCALGROUP_INFO_0 localgroup_info;
 		localgroup_info.lgrpi0_name = groupName;
 
-		NetLocalGroupDel(NULL, groupName);
 
-		if (NetLocalGroupAdd(NULL, 0, (LPBYTE)&localgroup_info, NULL) != NERR_Success) {
+		NET_API_STATUS result = NetLocalGroupAdd(NULL, 0, (LPBYTE)&localgroup_info, NULL);
+		if (result != NERR_Success) {
+			if (result == NERR_GroupExists) wprintf(L"Specified group name already exists");
+			else wprintf(L"Could not create specified group");
 			sid = NULL;
 			return false;
 		}
@@ -55,6 +56,7 @@ namespace tokenLib {
 		sid = (PSID) new BYTE[bufferSize];
 		LPTSTR domain = (LPTSTR) new BYTE[buffer2Size * sizeof(TCHAR)];
 		if (!LookupAccountName(NULL, groupName, sid, &bufferSize, domain, &buffer2Size, &accountType)) {
+			wprintf(L"Could not retrieve SID of newly created group");
 			NetLocalGroupDel(NULL, groupName);
 			delete[](BYTE*) sid;
 			delete[](BYTE*) domain;
@@ -245,22 +247,6 @@ void deconstructToken(tokenStructures &tokenDeconstructed, HANDLE &userToken) {
 }
 
 
-void enumerateSidsAndHashes(PTOKEN_ACCESS_INFORMATION pToken) {
-	PSID_AND_ATTRIBUTES_HASH hashes = pToken->SidHash;
-	for (size_t i = 0; i < hashes->SidCount; ++i) {
-
-		SID_AND_ATTRIBUTES &sidAndAttributes = hashes->SidAttr[i];
-		PSID pSid = sidAndAttributes.Sid;
-		LPOLESTR stringSid = NULL;
-		ConvertSidToStringSid(pSid, &stringSid);
-		wprintf(L"  %s\r", stringSid);
-		SID_HASH_ENTRY &sidHashEntry = hashes->Hash[i];
-		wprintf(L"  %u\r\n", sidHashEntry);
-		LocalFree(stringSid);
-		getchar();
-	}
-}
-
 //adopted from MSDN example
 BOOL setPrivilege(
 	HANDLE hToken,          // access token handle
@@ -335,7 +321,7 @@ bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed, PTOKEN
 	DWORD groupCount = tokenGroups->GroupCount;
 	SID_AND_ATTRIBUTES newGroup{ sid, SE_GROUP_ENABLED };
 
-	PTOKEN_GROUPS tokenGroupsMod = (PTOKEN_GROUPS)malloc(FIELD_OFFSET(TOKEN_GROUPS, Groups[groupCount+1]));
+	PTOKEN_GROUPS tokenGroupsMod = (PTOKEN_GROUPS) new BYTE[(FIELD_OFFSET(TOKEN_GROUPS, Groups[groupCount+1]))];
 	for (size_t i = 0; i < groupCount; i++)
 	{
 		tokenGroupsMod->Groups[i] = tokenGroups->Groups[i];
