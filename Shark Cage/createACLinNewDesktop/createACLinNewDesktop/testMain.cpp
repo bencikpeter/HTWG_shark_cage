@@ -10,16 +10,19 @@
 #include <crtdbg.h>
 
 int main() {
-	LPWSTR  group_name = L"Dummy_group_testing_token_mod";
+	LPWSTR  groupName = L"Dummy_group_testing_token_mod";
 	SID_NAME_USE accountType;
 	HANDLE modifiedTokenHandle = 0;
 
 
 	PSID newGroupSid = 0;
-
-	tokenLib::createLocalGroup(group_name, newGroupSid);
-	tokenLib::constructUserTokenWithGroup(newGroupSid, modifiedTokenHandle);
-	delete[](BYTE*) newGroupSid;
+	NetLocalGroupDel(NULL, groupName);
+	if (!tokenLib::createLocalGroup(groupName, newGroupSid) ||
+		!tokenLib::constructUserTokenWithGroup(newGroupSid, modifiedTokenHandle)) {
+		tokenLib::destroySid(newGroupSid);
+		return 22;
+	}
+	tokenLib::destroySid(newGroupSid);
 
 
 	//surface all the groups to the console - just to demonstrate that a token has selected group in it.
@@ -44,7 +47,7 @@ int main() {
 
 	delete[](BYTE*) groups;
 
-	tokenLib::deleteLocalGroup(group_name);
+	tokenLib::deleteLocalGroup(groupName);
 	getchar();
 
 	_CrtDumpMemoryLeaks();

@@ -67,6 +67,12 @@ namespace tokenLib {
 		return true;
 	}
 
+	bool destroySid(PSID &sid) {
+		delete[](BYTE*) sid;
+		sid = NULL;
+		return true;
+	}
+
 	bool deleteLocalGroup(LPWSTR groupName) {
 		if(NetLocalGroupDel(NULL, groupName) != NERR_Success)
 			return false;
@@ -322,11 +328,13 @@ bool addGroupToTokenGroups(PSID sid, tokenStructures &tokenDeconstructed, PTOKEN
 	PTOKEN_GROUPS tokenGroupsMod = (PTOKEN_GROUPS) new BYTE[(FIELD_OFFSET(TOKEN_GROUPS, Groups[groupCount+1]))];
 	for (size_t i = 0; i < groupCount; i++)
 	{
+		
 		tokenGroupsMod->Groups[i] = tokenGroups->Groups[i];
 	}
 	tokenGroupsMod->Groups[groupCount] = newGroup;
 	tokenGroupsMod->GroupCount = groupCount + 1;
 
+	//TODO: figure out why this cannot be replaced but old memmory has to remain - possible double free issue?
 	newGroups = tokenGroupsMod;
 
 	return true;
