@@ -24,7 +24,10 @@
     <ClInclude Include="targetver.h">
       <Filter>Archivos de encabezado</Filter>
     </ClInclude>
-    <ClInclude Include="util.h">
+    <ClInclude Include="tokenManipulation.h">
+      <Filter>Archivos de código fuente</Filter>
+    </ClInclude>
+    <ClInclude Include="groupManipulation.h">
       <Filter>Archivos de código fuente</Filter>
     </ClInclude>
   </ItemGroup>
@@ -32,11 +35,11 @@
     <ClCompile Include="stdafx.cpp">
       <Filter>Archivos de código fuente</Filter>
     </ClCompile>
-    <ClCompile Include="util.cpp">
-      <Filter>Archivos de encabezado</Filter>
-    </ClCompile>
     <ClCompile Include="testMain.cpp">
       <Filter>Archivos de código fuente</Filter>
+    </ClCompile>
+    <ClCompile Include="tokenLib.cpp">
+      <Filter>Archivos de encabezado</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
