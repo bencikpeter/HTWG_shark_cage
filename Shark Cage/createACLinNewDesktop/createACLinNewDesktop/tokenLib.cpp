@@ -62,7 +62,6 @@ public:
 
 	~tokenTemplate();
 
-	//TODO: allow repeated calls, now only one is possible;
 	bool addGroup(PSID sid);
 
 	bool generateToken(HANDLE & token);
@@ -128,7 +127,6 @@ namespace tokenLib {
 		std::unique_ptr<tokenTemplate> tokenDeconstructed{};
 		try
 		{
-			//tokenTemplate tokenDeconstructed(userToken);
 			tokenDeconstructed = std::make_unique<tokenTemplate>(userToken);
 		}
 		catch (const TokenParsingException& e)
@@ -237,7 +235,7 @@ bool setPrivilege(
 
 bool changeTokenCreationPrivilege(bool privilegeStatus) {
 	//keeping this for future debug purposes
-	//will be important when implementing token capture for a token having SE_CREATE_TOKEN_NAME included
+	//will be important if ever implementing token capture for a token having SE_CREATE_TOKEN_NAME included
 	/*
 	DWORD bufferSize = 0;
 	GetUserName(NULL, &bufferSize);
@@ -259,7 +257,6 @@ bool changeTokenCreationPrivilege(bool privilegeStatus) {
 }
 
 tokenTemplate::tokenTemplate(HANDLE &userToken) {
-	//TODO: error checking and response,  might move some logic out of constructor?
 
 	//load internal NtCreateToken function
 	HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
