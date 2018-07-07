@@ -6,7 +6,7 @@ namespace tokenLib {
 	/**
 	* Creates a new local group with a name groupName and returns it´s SID. To deallocate returned sid, use destroySid() fucntion.
 	* @param groupName string literal representing the name of the group (IN)
-	* @param sid reference to the new group sid, NULL if function fails (OUT)
+	* @param sid reference to the new group sid, set to NULL if function fails (OUT)
 	* @return true if success
 	**/
 	bool createLocalGroup(LPWSTR groupName, PSID &sid);

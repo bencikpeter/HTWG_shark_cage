@@ -22,7 +22,7 @@ namespace tokenLib {
 	bool constructUserTokenWithGroup(PSID sid, HANDLE &token);
 
 	/**
-	* Function gets a name of a group and creates a token with a group entry added in the token. If the group already exists, the function fails.
+	* Function gets a name of a group and creates a token with a group entry added in the token. The group must exist, otherwise the function will fail
 	* The group will not be deleted at return, otherwise the token would be useless.
 	* Source of the token is the token of the process itself. Returned token is identical to the calling process token, just includes one more group
 	* SE_CREATE_TOKEN_NAME must be held and enabled by a calling process, to successfully call this method

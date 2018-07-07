@@ -9,10 +9,20 @@
 #include <ntstatus.h>
 #include <iostream>
 #include <stdio.h>
+#include <exception>
 #pragma comment(lib, "netapi32.lib")
 
 ULONG getCurrentSessionID();
 bool changeTokenCreationPrivilege(bool privilegeStatus);
+bool getGroupSid(LPWSTR groupName, PSID &sid);
+
+class TokenParsingException : public std::exception {
+public:
+	const char * what() const throw () {
+		return "Error encountered parsing template token";
+	}
+};
+
 class tokenTemplate {
 
 private:
@@ -61,7 +71,6 @@ public:
 namespace tokenLib {
 
 	bool createLocalGroup(LPWSTR groupName, PSID &sid) {
-		SID_NAME_USE accountType;
 		LOCALGROUP_INFO_0 localGroupInfo;
 		localGroupInfo.lgrpi0_name = groupName;
 
@@ -74,21 +83,7 @@ namespace tokenLib {
 			return false;
 		}
 
-		DWORD bufferSize = 0, buffer2Size = 0;
-
-		LookupAccountName(NULL, groupName, NULL, &bufferSize, NULL, &buffer2Size, &accountType);
-		sid = (PSID) new BYTE[bufferSize];
-		LPTSTR domain = (LPTSTR) new BYTE[buffer2Size * sizeof(TCHAR)];
-		if (!LookupAccountName(NULL, groupName, sid, &bufferSize, domain, &buffer2Size, &accountType)) {
-			wprintf(L"Could not retrieve SID of newly created group");
-			NetLocalGroupDel(NULL, groupName);
-			delete[](BYTE*) sid;
-			delete[](BYTE*) domain;
-			sid = NULL;
-			return false;
-		}
-		delete[](BYTE*) domain;
-		return true;
+		return getGroupSid(groupName,sid);
 	}
 
 	bool destroySid(PSID &sid) {
@@ -105,13 +100,13 @@ namespace tokenLib {
 
 	bool constructUserTokenWithGroup(LPWSTR groupName, HANDLE &token) {
 		PSID groupSid = 0;
-		if (!createLocalGroup(groupName, groupSid)){
+		if (!getGroupSid(groupName,groupSid)){
 			token = 0;
 			return false;
 		}
 		if (!constructUserTokenWithGroup(groupSid, token))
 		{
-			deleteLocalGroup(groupName);
+			token = 0;
 			destroySid(groupSid);
 			return false;
 		}
@@ -130,17 +125,29 @@ namespace tokenLib {
 		}
 
 		//sample the token into individual structures
-		tokenTemplate tokenDeconstructed(userToken);
+		std::unique_ptr<tokenTemplate> tokenDeconstructed{};
+		try
+		{
+			//tokenTemplate tokenDeconstructed(userToken);
+			tokenDeconstructed = std::make_unique<tokenTemplate>(userToken);
+		}
+		catch (const TokenParsingException& e)
+		{
+			wprintf(L"%s\n",e.what());
+			CloseHandle(userToken);
+			return false;
+		}
 		CloseHandle(userToken);
+		
 
 		//add desired group to the token
-		if (!tokenDeconstructed.addGroup(sid)) {
+		if (!tokenDeconstructed->addGroup(sid)) {
 			wprintf(L"  Cannot add group to a token\n");
 			return false;
 		}
 
 		//generate new access token 
-		if (!tokenDeconstructed.generateToken(token)) {
+		if (!tokenDeconstructed->generateToken(token)) {
 			wprintf(L"  Cannot construct a token\n");
 			return false;
 		}
@@ -162,6 +169,25 @@ ULONG getCurrentSessionID() {
 
 	}
 	return 0;
+}
+
+bool getGroupSid(LPWSTR groupName, PSID &sid) {
+	SID_NAME_USE accountType;
+	DWORD bufferSize = 0, buffer2Size = 0;
+
+	LookupAccountName(NULL, groupName, NULL, &bufferSize, NULL, &buffer2Size, &accountType);
+	sid = (PSID) new BYTE[bufferSize];
+	LPTSTR domain = (LPTSTR) new BYTE[buffer2Size * sizeof(TCHAR)];
+	if (!LookupAccountName(NULL, groupName, sid, &bufferSize, domain, &buffer2Size, &accountType)) {
+		wprintf(L"Could not retrieve SID of newly created group");
+		NetLocalGroupDel(NULL, groupName);
+		delete[](BYTE*) sid;
+		delete[](BYTE*) domain;
+		sid = NULL;
+		return false;
+	}
+	delete[](BYTE*) domain;
+	return true;
 }
 
 
@@ -229,9 +255,11 @@ bool changeTokenCreationPrivilege(bool privilegeStatus) {
 		return false;
 	}
 	return setPrivilege(userTokenHandle, SE_CREATE_TOKEN_NAME, privilegeStatus);
+	CloseHandle(userTokenHandle);
 }
 
 tokenTemplate::tokenTemplate(HANDLE &userToken) {
+	//TODO: error checking and response,  might move some logic out of constructor?
 
 	//load internal NtCreateToken function
 	HMODULE hModule = LoadLibrary(_T("ntdll.dll"));
@@ -242,54 +270,90 @@ tokenTemplate::tokenTemplate(HANDLE &userToken) {
 	GetTokenInformation(userToken, TokenType, NULL, 0, &bufferSize);
 	SetLastError(0);
 	GetTokenInformation(userToken, TokenType, (LPVOID)&tokenType, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenUser, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenUser = (PTOKEN_USER) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenUser, (LPVOID)tokenUser, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenGroups, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenGroups = (PTOKEN_GROUPS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenGroups, (LPVOID)tokenGroups, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenPrivileges, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenPrivileges = (PTOKEN_PRIVILEGES) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenPrivileges, (LPVOID)tokenPrivileges, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenOwner, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenOwner = (PTOKEN_OWNER) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenOwner, (LPVOID)tokenOwner, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenPrimaryGroup, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenPrimaryGroup = (PTOKEN_PRIMARY_GROUP) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenPrimaryGroup, (LPVOID)tokenPrimaryGroup, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenDefaultDacl, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenDefaultDacl = (PTOKEN_DEFAULT_DACL) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenDefaultDacl, (LPVOID)tokenDefaultDacl, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenSource, NULL, 0, &bufferSize);
 	SetLastError(0);
 	tokenSource = (PTOKEN_SOURCE) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenSource, (LPVOID)tokenSource, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	bufferSize = 0;
 	GetTokenInformation(userToken, TokenStatistics, NULL, 0, &bufferSize);
 	SetLastError(0);
 	PTOKEN_STATISTICS stats = (PTOKEN_STATISTICS) new BYTE[bufferSize];
 	GetTokenInformation(userToken, TokenStatistics, (LPVOID)stats, bufferSize, &bufferSize);
+	if (GetLastError() != 0)
+	{
+		throw TokenParsingException();
+	}
 
 	expirationTime = new LARGE_INTEGER{ stats->ExpirationTime };
 	authenticationId = new LUID{ stats->AuthenticationId };
@@ -348,8 +412,15 @@ inline bool tokenTemplate::generateToken(HANDLE & token) {
 		return false;
 	}
 
-	HANDLE newToken;
+	HANDLE newToken = 0;
+	PTOKEN_GROUPS groups = NULL;
 
+	if (modifiedGroups == NULL) { //token not modified
+		groups = tokenGroups;
+	}
+	else {
+		groups = modifiedGroups;
+	}
 	//construct token
 	NTSTATUS status = NtCreateToken(
 		&newToken,
@@ -359,7 +430,7 @@ inline bool tokenTemplate::generateToken(HANDLE & token) {
 		authenticationId,
 		expirationTime,
 		tokenUser,
-		modifiedGroups,
+		groups,
 		tokenPrivileges,
 		tokenOwner,
 		tokenPrimaryGroup,
@@ -371,6 +442,7 @@ inline bool tokenTemplate::generateToken(HANDLE & token) {
 	changeTokenCreationPrivilege(false);
 
 	if (!NT_SUCCESS(status)) {
+		wprintf(L"  Cannot create modified token\n");
 		token = NULL;
 		return false;
 	}
